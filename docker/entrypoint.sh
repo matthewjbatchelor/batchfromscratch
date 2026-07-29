@@ -165,6 +165,30 @@ if [ -n "${WORDPRESS_DB_HOST:-}" ]; then
         log "ERROR: establishing a database connection'. The client reported:"
         printf '%s\n' "${db_probe}" >&2
     fi
+
+    # The client above proves the network path and the credentials, and nothing more.
+    # WordPress connects through PHP's mysqli, which differs in TLS defaults and in
+    # which authentication plugins it supports — so it can fail where the client
+    # succeeds. That gap is invisible unless it is tested directly.
+    php_probe="$(php -r '
+        $host = getenv("WORDPRESS_DB_HOST"); $port = 3306;
+        if (($p = strrpos($host, ":")) !== false) {
+            $port = (int) substr($host, $p + 1);
+            $host = substr($host, 0, $p);
+        }
+        $m = mysqli_init();
+        if (@mysqli_real_connect($m, $host, getenv("WORDPRESS_DB_USER"),
+                getenv("WORDPRESS_DB_PASSWORD"), getenv("WORDPRESS_DB_NAME"), $port)) {
+            echo "ok server=" . $m->server_info;
+        } else {
+            echo "FAILED(" . mysqli_connect_errno() . "): " . mysqli_connect_error();
+        }
+    ' 2>&1)"
+    case "${php_probe}" in
+        ok*) log "database: PHP mysqli connected — ${php_probe#ok }" ;;
+        *)   log "ERROR: PHP mysqli could NOT connect where the client could."
+             log "ERROR: this is the path WordPress uses. It reported: ${php_probe}" ;;
+    esac
 fi
 
 # ---------------------------------------------------------------------------
