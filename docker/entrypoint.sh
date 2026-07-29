@@ -401,9 +401,19 @@ define( 'WP_ADMIN', true );
 require '/var/www/html/wp-load.php';
 echo 'WP LOADED OK';
 PHPPROBE
+    # Tags stripped rather than grepped: WP_ADMIN makes dead_db() print the real
+    # reason as prose, and keyword filtering discarded exactly that sentence.
     log "check: apache PHP env -> $(curl -s "http://127.0.0.1:${PORT}/bfs-envprobe.php" 2>&1 \
-        | grep -aiE 'len=|warning|fatal|mysqli|WP LOADED|error' | head -6 | tr '\n' ' ')"
+        | sed -e 's/<[^>]*>/ /g' | tr -s ' \n\t' ' ' | cut -c1-500)"
     rm -f /var/www/html/bfs-envprobe.php
+
+    # is_blog_installed() calls dead_db() when the tables exist but siteurl does not:
+    # an install that created the schema and never finished writing its options looks,
+    # to a visitor, exactly like a database that cannot be reached.
+    log "check: options -> $(cd /var/www/html && wp --allow-root db query \
+        "SELECT option_name FROM wp_options WHERE option_name IN ('siteurl','home','blogname')" \
+        2>&1 | tr '\n' ' ') | rows=$(cd /var/www/html && wp --allow-root db query \
+        'SELECT COUNT(*) FROM wp_options' 2>&1 | tail -1)"
     log "check: getenv_docker -> $(sed -n '/function getenv_docker/,/^}/p' \
         /var/www/html/wp-config.php 2>/dev/null | tr -s '\n\t ' ' ')"
 

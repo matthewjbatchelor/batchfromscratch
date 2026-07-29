@@ -108,7 +108,24 @@ COPY config/healthz.php /usr/local/share/batchfromscratch/healthz.php
 # requested directly — a file in /var/www/html would be one Apache misconfiguration
 # away from dumping the database credentials it has access to.
 COPY config/wp-config-extra.php /usr/local/etc/wordpress/wp-config-extra.php
-ENV WORDPRESS_CONFIG_EXTRA="require '/usr/local/etc/wordpress/wp-config-extra.php';"
+ENV WORDPRESS_CONFIG_EXTRA="require_once '/usr/local/etc/wordpress/wp-config-extra.php';"
+
+# WORDPRESS_CONFIG_EXTRA alone is not enough. The upstream entrypoint inserts it by
+# matching a marker comment in wp-config-docker.php, and on WordPress 7.0 that match
+# fails silently: the variable is set correctly and the require never appears in the
+# generated wp-config.php. The effect is a site with no HTTPS proxy handling and no
+# WP_HOME, which redirects to http://host:8080 and loops.
+#
+# So the require is written into the template at build time instead, immediately
+# before wp-settings.php — late enough that DB_NAME exists, early enough to precede
+# WordPress. require_once in both places, so if upstream's insertion starts working
+# again the file is still only included once. The grep is the assertion: if the
+# anchor ever moves, this fails the build rather than shipping a looping site.
+RUN set -eux; \
+    sed -i "s#^require_once ABSPATH . 'wp-settings.php';#require_once '/usr/local/etc/wordpress/wp-config-extra.php';\nrequire_once ABSPATH . 'wp-settings.php';#" \
+        /usr/src/wordpress/wp-config-docker.php; \
+    grep -q "wp-config-extra.php" /usr/src/wordpress/wp-config-docker.php; \
+    php -l /usr/src/wordpress/wp-config-docker.php
 
 COPY docker/entrypoint.sh /usr/local/bin/railway-entrypoint.sh
 RUN chmod +x /usr/local/bin/railway-entrypoint.sh
