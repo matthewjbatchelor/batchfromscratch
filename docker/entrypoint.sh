@@ -39,6 +39,13 @@ if [ "$#" -eq 3 ] && [ "$2" = '-c' ]; then
 fi
 log "command: $*"
 
+# Identify the image on every boot. A crash loop looks byte-identical across deploys,
+# so without this there is no way to tell from the logs whether a fix has actually
+# shipped or whether you are reading the previous deployment still cycling. Railway
+# supplies the commit; the WordPress version comes from the image itself.
+wp_version="$(grep -m1 "^\$wp_version" /usr/src/wordpress/wp-includes/version.php | cut -d"'" -f2 || true)"
+log "image: WordPress ${wp_version:-unknown}, commit ${RAILWAY_GIT_COMMIT_SHA:-unset}"
+
 # ---------------------------------------------------------------------------
 # 1. Listen port
 # ---------------------------------------------------------------------------
