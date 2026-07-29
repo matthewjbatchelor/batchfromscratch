@@ -60,10 +60,23 @@ jobs:
       # Dockerfile. See the ARG comment at the top of the Dockerfile.
       - name: Report the resolved WordPress and PHP versions
         run: |
-          echo "Pin these in the Dockerfile's WP_IMAGE_TAG:"
+          echo "Built from:"
+          # The unanchored grep this used to run matched the docblock line
+          # "* @global string $wp_version" and never printed a version at all, which
+          # is a large part of why the base image stayed on a rolling tag.
           docker run --rm --entrypoint sh batchfromscratch:ci -c \
             'php -r "echo \"PHP \" . PHP_VERSION . PHP_EOL;"; \
-             grep -m1 wp_version /usr/src/wordpress/wp-includes/version.php'
+             grep -m1 "^\$wp_version = " /usr/src/wordpress/wp-includes/version.php'
+          # Exactly one MPM must be loaded — two makes Apache exit at startup, which
+          # surfaces as a refused connection rather than an HTTP error.
+          mpms=$(docker run --rm --entrypoint sh batchfromscratch:ci -c \
+            'ls /etc/apache2/mods-enabled/mpm_*.load' | wc -l | tr -d ' ')
+          docker run --rm --entrypoint sh batchfromscratch:ci -c \
+            'ls /etc/apache2/mods-enabled/mpm_*.load'
+          if [ "$mpms" != "1" ]; then
+            echo "::error::$mpms MPMs enabled — Apache will refuse to start"
+            exit 1
+          fi
 
       # A green Docker build proves the Dockerfile parses, not that the site runs.
       # Booting it against a real MySQL is what catches an Apache directive typo,
