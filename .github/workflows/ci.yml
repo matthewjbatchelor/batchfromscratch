@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: none
+
+      - name: PHP syntax check
+        run: |
+          find . -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Shell syntax check
+        run: |
+          for f in docker/entrypoint.sh scripts/*.sh; do bash -n "$f"; done
+
+      # wp-config-extra.php runs before WordPress exists and before ABSPATH is
+      # defined. Getting it wrong fatals every request with no useful message, so
+      # its behaviour is asserted rather than assumed.
+      - name: wp-config behaviour
+        run: php scripts/test-wp-config.php
+
+      # Errors only. Style warnings on a handful of deploy scripts are not worth a
+      # red build, and a CI check that cries wolf is a CI check people stop reading.
+      - name: Shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.'
+          severity: error
+
+  build:
+    name: Build and boot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: batchfromscratch:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Surfaces the version the rolling tag resolved to, so it can be pinned in the
+      # Dockerfile. See the ARG comment at the top of the Dockerfile.
+      - name: Report the resolved WordPress and PHP versions
+        run: |
+          echo "Pin these in the Dockerfile's WP_IMAGE_TAG:"
+          docker run --rm --entrypoint sh batchfromscratch:ci -c \
+            'php -r "echo \"PHP \" . PHP_VERSION . PHP_EOL;"; \
+             grep -m1 wp_version /usr/src/wordpress/wp-includes/version.php'
+
+      # A green Docker build proves the Dockerfile parses, not that the site runs.
+      # Booting it against a real MySQL is what catches an Apache directive typo,
+      # a bad wp-config heredoc, or an entrypoint that exits before Apache starts.
+      - name: Start MySQL
+        run: |
+          docker network create ci
+          docker run -d --name db --network ci \
+            -e MYSQL_DATABASE=wordpress \
+            -e MYSQL_USER=wordpress \
+            -e MYSQL_PASSWORD=wordpress \
+            -e MYSQL_ROOT_PASSWORD=root \
+            mysql:8.0
+          for i in $(seq 1 60); do
+            docker exec db mysqladmin ping -h127.0.0.1 -uroot -proot --silent && break
+            sleep 2
+          done
+
+      - name: Boot the container
+        run: |
+          docker run -d --name web --network ci -p 8080:8080 \
+            -e PORT=8080 \
+            -e MYSQLHOST=db -e MYSQLPORT=3306 \
+            -e MYSQLUSER=wordpress -e MYSQLPASSWORD=wordpress -e MYSQLDATABASE=wordpress \
+            -e WP_HOME=http://localhost:8080 -e WP_SITEURL=http://localhost:8080 \
+            batchfromscratch:ci
+
+      - name: Wait for the health endpoint
+        run: |
+          for i in $(seq 1 45); do
+            if curl -fsS http://localhost:8080/healthz.php | grep -q '^ok$'; then
+              echo "health check passed"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::container never became healthy"
+          docker logs web
+          exit 1
+
+      - name: WordPress responds
+        run: |
+          # A fresh database means WordPress redirects to the install wizard.
+          # That is the expected healthy answer here: it proves PHP ran, the
+          # database connection succeeded, and Apache is serving WordPress
+          # rather than a 500.
+          body=$(curl -fsSL http://localhost:8080/ || true)
+          echo "$body" | head -40
+          echo "$body" | grep -qiE 'wordpress|installation' || {
+            echo "::error::unexpected response from WordPress"
+            docker logs web
+            exit 1
+          }
+
+      - name: Theme is present and recognised
+        run: |
+          docker exec -u www-data web wp --path=/var/www/html theme list --format=csv || true
+          docker exec web test -f /var/www/html/wp-content/themes/batchfromscratch/style.css
+
+      - name: Uploads directory must not execute PHP
+        run: |
+          docker exec web sh -c 'mkdir -p /var/www/html/wp-content/uploads && echo "<?php echo 9*9;" > /var/www/html/wp-content/uploads/probe.php'
+          code=$(curl -s -o /tmp/out -w '%{http_code}' http://localhost:8080/wp-content/uploads/probe.php)
+          echo "status=$code"; cat /tmp/out
+          if [ "$code" != "403" ]; then
+            echo "::error::uploads directory served PHP (status $code) — the Apache guard is not working"
+            exit 1
+          fi
+
+      - name: Container logs
+        if: always()
+        run: docker logs web || true
