@@ -23,7 +23,7 @@ RUN set -eux; \
 # Pulled from the GitHub release rather than the wp-cli/builds gh-pages tree: that tree
 # only publishes an unversioned wp-cli.phar, which tracks latest and would defeat the
 # pinning above. The release URL is versioned and immutable.
-ENV WP_CLI_VERSION=2.11.0
+ENV WP_CLI_VERSION=2.12.0
 RUN set -eux; \
     curl -fsSL -o /usr/local/bin/wp \
         "https://github.com/wp-cli/wp-cli/releases/download/v${WP_CLI_VERSION}/wp-cli-${WP_CLI_VERSION}.phar"; \
