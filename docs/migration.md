@@ -87,9 +87,25 @@ archives".
    `WORDPRESS_NONCE_KEY`, `WORDPRESS_AUTH_SALT`, `WORDPRESS_SECURE_AUTH_SALT`,
    `WORDPRESS_LOGGED_IN_SALT`, `WORDPRESS_NONCE_SALT`.
 
-   The database variables do not need setting: the entrypoint reads Railway's
-   `MYSQLHOST`/`MYSQLUSER`/… from the MySQL service. If the two services are in the same
-   project this works with no extra configuration.
+   The database variables **do** need setting, as references to the MySQL service:
+
+   ```
+   MYSQLHOST     = ${{MySQL.MYSQLHOST}}
+   MYSQLPORT     = ${{MySQL.MYSQLPORT}}
+   MYSQLUSER     = ${{MySQL.MYSQLUSER}}
+   MYSQLPASSWORD = ${{MySQL.MYSQLPASSWORD}}
+   MYSQLDATABASE = ${{MySQL.MYSQLDATABASE}}
+   ```
+
+   Substitute the MySQL service's actual name if it is not `MySQL`. The entrypoint
+   translates these into the `WORDPRESS_DB_*` form the image expects, and referencing
+   `MYSQLHOST` rather than a public URL keeps the traffic on Railway's private network.
+
+   This section previously claimed sharing a project was enough and that no database
+   configuration was needed. It is not: Railway scopes variables to a service, and
+   without these references the container boots, Apache serves, and every page is
+   "Error establishing a database connection" — with `[entrypoint] WARNING: no database
+   variables found` as the only clue in the logs.
 
 5. Generate a domain and open it. You should get the WordPress install wizard. Complete
    it with a fresh admin username — not `mattjbatchelor`, and not the password that has
