@@ -99,6 +99,22 @@ fi
 # Railway's MySQL service publishes MYSQLHOST/MYSQLPORT/... and a MYSQL_URL.
 # The WordPress image wants WORDPRESS_DB_*. Translate only when the WordPress
 # variables are absent, so an explicit override in the Railway dashboard still wins.
+
+# Report which of these the container can actually see. "absent" and "empty" mean
+# different things and point at different mistakes: absent is a variable that was
+# never added to this service, empty is one that was added but whose ${{...}}
+# reference resolved to nothing — usually a mistyped service name. Presence only;
+# these include the database password, and a log line is not a safe place for it.
+env_state() {
+    local name="$1"
+    if   [ -z "${!name+x}" ]; then printf '%s=absent' "${name}"
+    elif [ -z "${!name}"   ]; then printf '%s=EMPTY'  "${name}"
+    else                           printf '%s=set'    "${name}"
+    fi
+}
+log "database env: $(env_state MYSQLHOST) $(env_state MYSQLPORT) $(env_state MYSQLUSER)" \
+    "$(env_state MYSQLPASSWORD) $(env_state MYSQLDATABASE) $(env_state MYSQL_URL)" \
+    "$(env_state WORDPRESS_DB_HOST)"
 if [ -z "${WORDPRESS_DB_HOST:-}" ]; then
     if [ -n "${MYSQLHOST:-}" ]; then
         export WORDPRESS_DB_HOST="${MYSQLHOST}:${MYSQLPORT:-3306}"
