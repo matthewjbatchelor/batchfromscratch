@@ -311,8 +311,13 @@ install -o www-data -g www-data -m 0644 \
     # separates a WordPress fault from something specific to the request path.
     log "check: wp option get siteurl -> $(cd /var/www/html \
         && wp --allow-root option get siteurl 2>&1 | head -2 | tr '\n' ' ')"
-    log "check: tables in the database -> $(cd /var/www/html \
-        && wp --allow-root db query 'SHOW TABLES' 2>&1 | wc -l | tr -d ' ') line(s)"
+    # The count alone was never enough: WordPress checks for the specific tables its
+    # configured prefix implies, and a prefix that disagrees with what is in the
+    # database looks identical to a database with nothing in it.
+    log "check: tables -> $(cd /var/www/html \
+        && wp --allow-root db query 'SHOW TABLES' 2>&1 | tr '\n' ' ')"
+    log "check: table_prefix -> $(grep -n 'table_prefix *=' /var/www/html/wp-config.php \
+        2>/dev/null | head -2 | tr '\n' ' ')"
     # wp-settings.php loads wp-content/db.php in place of wpdb if it exists. A stale
     # drop-in on the volume would explain a connection that fails only through
     # WordPress while every direct attempt succeeds.
@@ -387,10 +392,12 @@ printf( ' | uid=%s | ', function_exists( 'posix_geteuid' ) ? posix_geteuid() : '
 // error page is not about connectivity. Load WordPress the way a real request does.
 // Defining WP_DEBUG first wins: wp-config.php's later define() cannot override it,
 // and with it set wpdb stops suppressing mysqli's error with @.
-define( 'WP_DEBUG', true );
-define( 'WP_DEBUG_DISPLAY', true );
 ini_set( 'display_errors', '1' );
 error_reporting( E_ALL );
+// dead_db() is terse on front-end requests and prints $wpdb->error verbatim when
+// WP_ADMIN is defined. No mysqli warning appears, so the connection is not what
+// failed — this is how to read which caller actually gave up and why.
+define( 'WP_ADMIN', true );
 require '/var/www/html/wp-load.php';
 echo 'WP LOADED OK';
 PHPPROBE
