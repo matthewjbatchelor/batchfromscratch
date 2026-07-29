@@ -313,6 +313,13 @@ install -o www-data -g www-data -m 0644 \
         && wp --allow-root option get siteurl 2>&1 | head -2 | tr '\n' ' ')"
     log "check: tables in the database -> $(cd /var/www/html \
         && wp --allow-root db query 'SHOW TABLES' 2>&1 | wc -l | tr -d ' ') line(s)"
+    # wpdb wraps its connect in @ unless WP_DEBUG is set, which is why every probe so
+    # far has had to infer the cause instead of reading it. wp-config-docker.php takes
+    # WP_DEBUG from WORDPRESS_DEBUG, so setting it for this one command unsuppresses
+    # the driver's actual error. Scoped to the command; nothing is displayed publicly.
+    log "check: wpdb error -> $(cd /var/www/html \
+        && WORDPRESS_DEBUG=1 wp --allow-root option get siteurl 2>&1 \
+        | head -8 | tr '\n' ' ')"
     probe_code="$(curl -s -o /tmp/bfs-local-probe -w '%{http_code}' \
         "http://127.0.0.1:${PORT}/" 2>&1 || true)"
     log "check: local request to Apache -> HTTP ${probe_code}" \
