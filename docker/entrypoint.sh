@@ -340,6 +340,20 @@ install -o www-data -g www-data -m 0644 \
         }
     ' 2>&1 | tr '\n' ' ')"
     rm -f /tmp/bfs-cfg.php
+
+    # Load WordPress far enough to instantiate wpdb and nothing further. SHORTINIT
+    # skips plugins, themes and most of core but still builds the database
+    # connection, so this is the real wpdb path with neither wp-cli's error handling
+    # nor Apache in the way. WP_DEBUG comes from WORDPRESS_DEBUG, and with it set
+    # wpdb stops prefixing its connect with @ — which is the warning nothing has been
+    # able to read so far. display_errors is pointed at stderr, so it lands in the
+    # container log and never in a response.
+    log "check: wpdb direct -> $(cd /var/www/html && WORDPRESS_DEBUG=1 \
+        php -d display_errors=stderr -d error_reporting=E_ALL -r '
+            define("SHORTINIT", true);
+            require "/var/www/html/wp-load.php";
+            echo "wpdb connected\n";
+        ' 2>&1 | grep -aiE 'warning|fatal|mysqli|connected' | head -4 | tr '\n' ' ')"
     probe_code="$(curl -s -o /tmp/bfs-local-probe -w '%{http_code}' \
         "http://127.0.0.1:${PORT}/" 2>&1 || true)"
     log "check: local request to Apache -> HTTP ${probe_code}" \
