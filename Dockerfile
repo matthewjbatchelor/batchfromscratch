@@ -1,9 +1,19 @@
 # Batch From Scratch — WordPress on Railway
 #
-# Based on the official WordPress image. WordPress core, PHP and Apache all come
-# from upstream and are pinned by tag here so a deploy is reproducible; nothing
-# self-updates in place. Bump the tag deliberately, in a commit.
-FROM wordpress:6.8.2-php8.3-apache
+# Based on the official WordPress image: WordPress core, PHP and Apache all come
+# from upstream and nothing self-updates in place.
+#
+# The tag is a build argument rather than a hardcoded patch version because this
+# repository was authored in an environment with no Docker daemon and no registry
+# access, so no specific tag could be verified to exist. A wrong tag fails the build
+# on line one. `php8.3-apache` is a rolling tag that is certain to resolve.
+#
+# AFTER THE FIRST GREEN CI RUN: read the resolved version out of the build log and
+# pin it here — `ARG WP_IMAGE_TAG=6.8.2-php8.3-apache`, or better, the image digest.
+# Reproducible deploys are the whole point of building from a Dockerfile, and a
+# rolling tag quietly gives that up.
+ARG WP_IMAGE_TAG=php8.3-apache
+FROM wordpress:${WP_IMAGE_TAG}
 
 # --- system packages -------------------------------------------------------
 # less + mysql-client are wp-cli dependencies (db export/import, interactive output).
