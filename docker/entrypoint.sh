@@ -59,7 +59,42 @@ sed "s/__PORT__/${PORT}/g" \
     > /etc/apache2/sites-available/000-default.conf
 
 # ---------------------------------------------------------------------------
-# 2. Database wiring
+# 2. Apache module sanity
+# ---------------------------------------------------------------------------
+# Apache exits at startup with "AH00534: More than one MPM loaded" if more than one
+# is enabled, and because it never binds, the symptom is a refused connection rather
+# than an error page — it reads as a network fault and sends you looking in the wrong
+# place. The Dockerfile enables exactly one and asserts it with `apache2ctl
+# configtest`, so a build that succeeded cannot have shipped two.
+#
+# The state is nevertheless reported here on every boot, and repaired if wrong. A
+# build-time assertion only covers what the build produced; this covers what the
+# container is actually running, which is the thing that was in question.
+mpm_list() { ls /etc/apache2/mods-enabled/mpm_*.load 2>/dev/null || true; }
+mpm_count="$(mpm_list | wc -l | tr -d ' ')"
+log "MPMs enabled (${mpm_count}): $(mpm_list | tr '\n' ' ')"
+
+if [ "${mpm_count}" != "1" ]; then
+    log "ERROR: ${mpm_count} MPMs enabled — Apache will refuse to start with AH00534."
+    log "ERROR: the image was built with exactly one, so something changed it after"
+    log "ERROR: the build. Repairing at runtime; this needs investigating, not ignoring."
+    a2dismod mpm_event  >/dev/null 2>&1 || true
+    a2dismod mpm_worker >/dev/null 2>&1 || true
+    a2enmod  mpm_prefork >/dev/null 2>&1 || true
+    log "MPMs after repair ($(mpm_list | wc -l | tr -d ' ')): $(mpm_list | tr '\n' ' ')"
+fi
+
+# Test the config Apache will actually load — the build-time check ran against the
+# base image's vhost, not the one rendered from the template a few lines above.
+if configtest="$(apache2ctl configtest 2>&1)"; then
+    log "configtest: $(printf '%s' "${configtest}" | tr '\n' ' ')"
+else
+    log "ERROR: configtest FAILED — Apache will not start:"
+    printf '%s\n' "${configtest}" >&2
+fi
+
+# ---------------------------------------------------------------------------
+# 3. Database wiring
 # ---------------------------------------------------------------------------
 # Railway's MySQL service publishes MYSQLHOST/MYSQLPORT/... and a MYSQL_URL.
 # The WordPress image wants WORDPRESS_DB_*. Translate only when the WordPress
@@ -91,7 +126,7 @@ if [ -z "${WORDPRESS_DB_HOST:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Persistent wp-content
+# 4. Persistent wp-content
 # ---------------------------------------------------------------------------
 # A Railway volume is mounted at /var/www/html/wp-content so uploads and any
 # admin-installed plugins survive a redeploy. The theme and mu-plugins are the
@@ -123,7 +158,7 @@ if [ ! -f "${WP_CONTENT}/.ownership-done" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Health endpoint
+# 5. Health endpoint
 # ---------------------------------------------------------------------------
 # Installed on every boot, before WordPress exists, so that Railway's health check
 # passes as soon as Apache is up and reports honestly if the WordPress install step
@@ -135,7 +170,7 @@ install -o www-data -g www-data -m 0644 \
     /var/www/html/healthz.php
 
 # ---------------------------------------------------------------------------
-# 5. Hand off
+# 6. Hand off
 # ---------------------------------------------------------------------------
 # The upstream entrypoint only performs its setup when the command starts with
 # "apache2", so it is invoked with the real command rather than a wrapper script.
