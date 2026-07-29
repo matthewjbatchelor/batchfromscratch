@@ -58,7 +58,12 @@ RUN set -eux; \
     a2dismod mpm_worker 2>/dev/null || true; \
     a2enmod mpm_prefork; \
     # Trust Railway's edge proxy so REMOTE_ADDR is the real client IP, not the router.
+    # ServerName stops the AH00558 warning Apache logs on every start, having guessed
+    # a name from the container's IPv6 address. Nothing depends on the value: the vhost
+    # is a catch-all and WordPress builds its URLs from WP_HOME/WP_SITEURL. It only
+    # silences noise that would otherwise be permanent.
     printf '%s\n' \
+        'ServerName localhost' \
         'RemoteIPHeader X-Forwarded-For' \
         'ServerTokens Prod' \
         'ServerSignature Off' \

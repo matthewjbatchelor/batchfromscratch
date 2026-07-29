@@ -133,6 +133,20 @@ fi
 # opposite: they are owned by this repository, so they are pushed into the volume
 # on every boot and any drift on the volume is discarded.
 WP_CONTENT=/var/www/html/wp-content
+
+# Whether the volume is actually mounted is worth stating outright. Without it
+# everything below still succeeds and the site still serves — uploads just go to the
+# container filesystem and vanish on the next deploy. That is silent until it is
+# expensive, and the only previous hint was the "first boot" message below recurring
+# on every deploy, which is a symptom you have to already know how to read.
+if grep -q " ${WP_CONTENT} " /proc/mounts 2>/dev/null; then
+    log "wp-content: volume mounted — uploads persist across deploys"
+else
+    log "WARNING: wp-content is NOT a mount point; it is the container filesystem."
+    log "WARNING: anything written to uploads is lost on the next deploy. Attach a"
+    log "WARNING: Railway volume at ${WP_CONTENT} before importing any media."
+fi
+
 mkdir -p "${WP_CONTENT}/uploads" "${WP_CONTENT}/themes" "${WP_CONTENT}/mu-plugins"
 
 sync_from_image() {
@@ -152,7 +166,10 @@ sync_from_image /usr/src/wordpress/wp-content/mu-plugins \
 # 1GB media library on every boot would add minutes to each deploy.
 chown www-data:www-data "${WP_CONTENT}" "${WP_CONTENT}/uploads" || true
 if [ ! -f "${WP_CONTENT}/.ownership-done" ]; then
-    log "first boot on this volume — normalising ownership (may take a moment)"
+    # Says "no marker" rather than "first boot on this volume": if wp-content is not
+    # actually a volume, this runs on every deploy, and the old wording asserted a
+    # persistence that was not there.
+    log "no ownership marker — normalising ownership (may take a moment)"
     chown -R www-data:www-data "${WP_CONTENT}" || true
     touch "${WP_CONTENT}/.ownership-done"
 fi

@@ -191,8 +191,42 @@ jobs:
           docker exec web-wrapped test -f /var/www/html/index.php
           docker exec web-wrapped test -f /var/www/html/wp-config.php
 
+      - name: Apache starts without the AH00558 warning
+        run: |
+          if docker logs web 2>&1 | grep -q AH00558; then
+            echo "::error::ServerName is not silencing AH00558"
+            docker logs web 2>&1 | grep AH00558
+            exit 1
+          fi
+          echo "no AH00558"
+
+      # A missing volume is silent until the day it costs you a media library, so the
+      # entrypoint reports which state it is in. Both directions are checked: the
+      # warning is only useful if it is absent when a volume really is mounted.
+      - name: wp-content volume detection reports both states
+        run: |
+          docker logs web 2>&1 | grep -q "NOT a mount point" || {
+            echo "::error::unmounted wp-content did not produce a warning"
+            docker logs web 2>&1 | grep -i wp-content || true
+            exit 1
+          }
+          docker volume create wpc >/dev/null
+          docker run -d --name web-vol --network ci -p 8082:8082 -e PORT=8082 \
+            -v wpc:/var/www/html/wp-content batchfromscratch:ci >/dev/null
+          for i in $(seq 1 30); do
+            docker logs web-vol 2>&1 | grep -q "wp-content: volume mounted" && break
+            sleep 1
+          done
+          docker logs web-vol 2>&1 | grep -q "wp-content: volume mounted" || {
+            echo "::error::a mounted volume was not detected"
+            docker logs web-vol
+            exit 1
+          }
+          echo "both states reported correctly"
+
       - name: Container logs
         if: always()
         run: |
           docker logs web || true
           docker logs web-wrapped || true
+          docker logs web-vol || true
