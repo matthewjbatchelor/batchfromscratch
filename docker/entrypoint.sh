@@ -189,6 +189,51 @@ if [ -n "${WORDPRESS_DB_HOST:-}" ]; then
         *)   log "ERROR: PHP mysqli could NOT connect where the client could."
              log "ERROR: this is the path WordPress uses. It reported: ${php_probe}" ;;
     esac
+
+    # ---------------------------------------------------------------------
+    # Repair a site address the installer left blank
+    # ---------------------------------------------------------------------
+    # WordPress writes siteurl and home to the database when it installs. This site
+    # was installed while Apache was still redirecting to its internal port, and both
+    # were recorded as empty strings. is_blog_installed() reads siteurl, finds it
+    # empty, decides the site is not installed, then finds tables present and calls
+    # dead_db() — so every page says "Error establishing a database connection" when
+    # the database is entirely healthy and the address is simply blank.
+    #
+    # Here the address is configuration rather than database state: WP_HOME and
+    # WP_SITEURL are service variables and wp-config-extra.php defines them as
+    # constants, which is what makes moving to batchfromscratch.me a variable change.
+    # Filling blank rows from them restores the intended value rather than inventing
+    # one. Only blank rows are touched, so a site with a real address is untouched,
+    # which also makes this idempotent across the redeploys Railway does freely.
+    site_url="${WP_SITEURL:-${WP_HOME:-}}"
+    site_url="${site_url%/}"
+    case "${site_url}" in
+        https://*|http://*)
+            case "${site_url}" in
+                # Refuse anything that could break out of the quoted SQL literal.
+                *[\'\"\\\;]*|*' '*)
+                    log "WARNING: WP_SITEURL/WP_HOME contains unexpected characters; not repairing"
+                    ;;
+                *)
+                    repaired="$(MYSQL_PWD="${WORDPRESS_DB_PASSWORD:-}" mysql \
+                        --connect-timeout=5 -N -B \
+                        -h "${db_host}" -P "${db_port}" \
+                        -u "${WORDPRESS_DB_USER:-root}" "${WORDPRESS_DB_NAME:-}" -e "
+                            UPDATE ${WORDPRESS_TABLE_PREFIX:-wp_}options
+                               SET option_value = '${site_url}'
+                             WHERE option_name IN ('siteurl','home')
+                               AND (option_value IS NULL OR option_value = '');
+                            SELECT ROW_COUNT();" 2>&1 | tail -1)"
+                    case "${repaired}" in
+                        0) : ;;  # nothing blank; the usual case once healthy
+                        [1-9]*) log "database: filled ${repaired} blank site address row(s) with ${site_url}" ;;
+                        *) log "WARNING: site address repair did not run cleanly: ${repaired}" ;;
+                    esac
+                    ;;
+            esac
+            ;;
+    esac
 fi
 
 # ---------------------------------------------------------------------------
