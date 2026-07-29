@@ -364,15 +364,24 @@ install -o www-data -g www-data -m 0644 \
 header( 'Content-Type: text/plain' );
 foreach ( array( 'WORDPRESS_DB_HOST', 'WORDPRESS_DB_USER', 'WORDPRESS_DB_NAME', 'WORDPRESS_DB_PASSWORD' ) as $k ) {
 	$v = getenv( $k );
-	printf(
-		"%s getenv=%s len=%d _ENV=%s _SERVER=%s | ",
-		$k,
-		false === $v ? 'FALSE' : 'set',
-		false === $v ? 0 : strlen( $v ),
-		isset( $_ENV[ $k ] ) ? 'y' : 'n',
-		isset( $_SERVER[ $k ] ) ? 'y' : 'n'
-	);
+	printf( "%s len=%d | ", $k, false === $v ? -1 : strlen( $v ) );
 }
+// The env is correct here, so connect from inside this request — same SAPI, same
+// user, same network namespace as the failing page — and report what the driver says.
+$h = getenv( 'WORDPRESS_DB_HOST' );
+$p = 3306;
+$i = strrpos( $h, ':' );
+if ( false !== $i ) {
+	$p = (int) substr( $h, $i + 1 );
+	$h = substr( $h, 0, $i );
+}
+$m = mysqli_init();
+if ( @mysqli_real_connect( $m, $h, getenv( 'WORDPRESS_DB_USER' ), getenv( 'WORDPRESS_DB_PASSWORD' ), null, $p ) ) {
+	printf( 'CONNECT OK server=%s select_db=%s', $m->server_info, mysqli_select_db( $m, getenv( 'WORDPRESS_DB_NAME' ) ) ? 'ok' : 'FAILED' );
+} else {
+	printf( 'CONNECT FAILED(%d): %s', mysqli_connect_errno(), mysqli_connect_error() );
+}
+printf( ' | uid=%s', function_exists( 'posix_geteuid' ) ? posix_geteuid() : 'n/a' );
 PHPPROBE
     log "check: apache PHP env -> $(curl -s "http://127.0.0.1:${PORT}/bfs-envprobe.php" 2>&1 | tr '\n' ' ')"
     rm -f /var/www/html/bfs-envprobe.php
