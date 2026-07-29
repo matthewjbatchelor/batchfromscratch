@@ -1,0 +1,61 @@
+# Rendered to 000-default.conf at boot with __PORT__ replaced by $PORT.
+<VirtualHost *:__PORT__>
+    DocumentRoot /var/www/html
+
+    <Directory /var/www/html>
+        Options -Indexes +FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    # wp-content holds user data only. Executing PHP from the uploads directory is
+    # the standard path from "someone uploaded a file" to "someone owns the site".
+    <Directory /var/www/html/wp-content/uploads>
+        <FilesMatch "\.(?i:php|phtml|phar|php[0-9])$">
+            Require all denied
+        </FilesMatch>
+    </Directory>
+
+    # Files that should never be served, whatever ends up on the volume.
+    <FilesMatch "^(wp-config\.php|\.env|.*\.sql|.*\.log|readme\.html|license\.txt)$">
+        Require all denied
+    </FilesMatch>
+
+    # xmlrpc.php is a perennial brute-force and pingback-amplification target and
+    # nothing on this site uses it. Remove this block if the WordPress mobile app
+    # or Jetpack is ever needed.
+    <Files "xmlrpc.php">
+        Require all denied
+    </Files>
+
+    # Media is immutable once published — filenames are content-addressed by
+    # WordPress's -WxH suffixes, so a long cache is safe and worth having given
+    # the size of this library.
+    <IfModule mod_expires.c>
+        ExpiresActive On
+        ExpiresByType image/jpeg  "access plus 1 year"
+        ExpiresByType image/png   "access plus 1 year"
+        ExpiresByType image/webp  "access plus 1 year"
+        ExpiresByType image/avif  "access plus 1 year"
+        ExpiresByType image/svg+xml "access plus 1 year"
+        ExpiresByType text/css    "access plus 1 month"
+        ExpiresByType application/javascript "access plus 1 month"
+        ExpiresByType font/woff2  "access plus 1 year"
+    </IfModule>
+
+    <IfModule mod_headers.c>
+        Header always set X-Content-Type-Options "nosniff"
+        Header always set X-Frame-Options "SAMEORIGIN"
+        Header always set Referrer-Policy "strict-origin-when-cross-origin"
+        # HSTS is set at the edge by Railway; duplicating it here is harmless and
+        # keeps the header present if the site is ever fronted by something else.
+        Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # PHP's version header leaks the exact patch level.
+        Header unset X-Powered-By
+    </IfModule>
+
+    ErrorLog  /dev/stderr
+    # Health checks hit / every few seconds; logging them buries real traffic.
+    SetEnvIf Request_URI "^/healthz\.php$" no_access_log
+    CustomLog /dev/stdout combined env=!no_access_log
+</VirtualHost>

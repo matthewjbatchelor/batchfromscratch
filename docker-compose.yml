@@ -1,0 +1,77 @@
+# Local development. Mirrors the Railway topology closely enough that a problem
+# reproduced here is a real problem there: same image, same entrypoint, same
+# wp-content volume arrangement.
+#
+#   docker compose up --build     → http://localhost:8080
+#   docker compose run --rm wpcli wp plugin list
+#
+services:
+  db:
+    image: mysql:8.0
+    command:
+      # WordPress and its plugins are full of legacy utf8mb3 assumptions; forcing
+      # the modern collation avoids "Illegal mix of collations" on import.
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: root
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  wordpress:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: "80"
+      # Set explicitly here; on Railway these are derived from the MySQL service.
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WP_HOME: http://localhost:8080
+      WP_SITEURL: http://localhost:8080
+      WORDPRESS_DEBUG: "1"
+    ports:
+      - "8080:80"
+    volumes:
+      - wp-content:/var/www/html/wp-content
+      # Live-edit the theme without rebuilding. The entrypoint's rsync runs before
+      # this bind mount matters, so edits here are what the browser sees.
+      - ./wp-content/themes/batchfromscratch:/var/www/html/wp-content/themes/batchfromscratch
+      - ./wp-content/mu-plugins:/var/www/html/wp-content/mu-plugins
+      # The migration payload, mounted read-only for the import scripts.
+      - ./migration:/migration:ro
+
+  # One-shot WP-CLI container sharing the web container's filesystem and database.
+  wpcli:
+    build:
+      context: .
+    depends_on:
+      db:
+        condition: service_healthy
+    user: www-data
+    entrypoint: ["wp"]
+    command: ["--info"]
+    environment:
+      WORDPRESS_DB_HOST: db:3306
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+    volumes:
+      - wp-content:/var/www/html/wp-content
+      - ./migration:/migration:ro
+
+volumes:
+  db-data:
+  wp-content:
