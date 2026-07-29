@@ -381,9 +381,21 @@ if ( @mysqli_real_connect( $m, $h, getenv( 'WORDPRESS_DB_USER' ), getenv( 'WORDP
 } else {
 	printf( 'CONNECT FAILED(%d): %s', mysqli_connect_errno(), mysqli_connect_error() );
 }
-printf( ' | uid=%s', function_exists( 'posix_geteuid' ) ? posix_geteuid() : 'n/a' );
+printf( ' | uid=%s | ', function_exists( 'posix_geteuid' ) ? posix_geteuid() : 'n/a' );
+
+// Everything above proves the database is reachable from this exact context, so the
+// error page is not about connectivity. Load WordPress the way a real request does.
+// Defining WP_DEBUG first wins: wp-config.php's later define() cannot override it,
+// and with it set wpdb stops suppressing mysqli's error with @.
+define( 'WP_DEBUG', true );
+define( 'WP_DEBUG_DISPLAY', true );
+ini_set( 'display_errors', '1' );
+error_reporting( E_ALL );
+require '/var/www/html/wp-load.php';
+echo 'WP LOADED OK';
 PHPPROBE
-    log "check: apache PHP env -> $(curl -s "http://127.0.0.1:${PORT}/bfs-envprobe.php" 2>&1 | tr '\n' ' ')"
+    log "check: apache PHP env -> $(curl -s "http://127.0.0.1:${PORT}/bfs-envprobe.php" 2>&1 \
+        | grep -aiE 'len=|warning|fatal|mysqli|WP LOADED|error' | head -6 | tr '\n' ' ')"
     rm -f /var/www/html/bfs-envprobe.php
     log "check: getenv_docker -> $(sed -n '/function getenv_docker/,/^}/p' \
         /var/www/html/wp-config.php 2>/dev/null | tr -s '\n\t ' ' ')"
