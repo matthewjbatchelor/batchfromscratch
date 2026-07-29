@@ -304,12 +304,19 @@ install -o www-data -g www-data -m 0644 \
     # probes above test what we *think* the credentials are, this tests what
     # WordPress actually resolves — and the client's error names the user and host
     # it tried, which is what distinguishes real values from the shipped placeholders.
-    wp_db="$(cd /var/www/html && wp --allow-root db query 'SELECT 1' 2>&1 | head -4)"
-    if [ -z "${wp_db}" ]; then
-        log "wp-config check: wp db query succeeded — WordPress's own credentials work"
-    else
-        log "wp-config check: wp db query said: $(printf '%s' "${wp_db}" | tr '\n' ' ')"
-    fi
+    # `wp db query` shells out to the mysql binary, so it proves the credentials in
+    # wp-config.php are good and nothing about PHP. These three close the remaining
+    # gaps: whether wpdb can connect through PHP, whether the database has any
+    # WordPress tables in it at all, and what Apache itself returns locally — which
+    # separates a WordPress fault from something specific to the request path.
+    log "check: wp option get siteurl -> $(cd /var/www/html \
+        && wp --allow-root option get siteurl 2>&1 | head -2 | tr '\n' ' ')"
+    log "check: tables in the database -> $(cd /var/www/html \
+        && wp --allow-root db query 'SHOW TABLES' 2>&1 | wc -l | tr -d ' ') line(s)"
+    probe_code="$(curl -s -o /tmp/bfs-local-probe -w '%{http_code}' \
+        "http://127.0.0.1:${PORT}/" 2>&1 || true)"
+    log "check: local request to Apache -> HTTP ${probe_code}" \
+        "$(grep -o 'Error establishing a database connection' /tmp/bfs-local-probe 2>/dev/null | head -1)"
 ) &
 
 log "handing off to the WordPress entrypoint"
