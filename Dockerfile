@@ -65,10 +65,14 @@ RUN set -eux; \
         'TraceEnable Off' \
         > /etc/apache2/conf-available/zz-railway.conf; \
     a2enconf zz-railway; \
-    # Assert the module set actually starts. This is the check that would have caught
-    # the MPM clash at build time instead of at Railway's healthcheck. The vhost here
-    # is still the base image's, since ours is only rendered at boot — CI's boot step
-    # is what covers the templated one.
+    # Count the MPMs directly. Railway shipped an image carrying both mpm_event and
+    # mpm_prefork whose build passed `apache2ctl configtest` — so configtest does not
+    # reliably detect this condition and cannot be the guard. Counting the symlinks
+    # tests the thing that actually matters and cannot be fooled.
+    test "$(ls /etc/apache2/mods-enabled/mpm_*.load | wc -l | tr -d '[:space:]')" = 1; \
+    # configtest still earns its place for everything else: a typo in the conf above
+    # would otherwise surface as a crash loop on deploy. Note it runs against the base
+    # image's vhost — ours is rendered at boot, and the entrypoint re-tests it there.
     apache2ctl configtest
 
 # --- site content bundled into the image -----------------------------------

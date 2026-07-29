@@ -78,6 +78,21 @@ jobs:
             exit 1
           fi
 
+      # Railway ran an image carrying two MPMs whose build passed `apache2ctl
+      # configtest`, so configtest is not a reliable guard for this. The Dockerfile
+      # counts the symlinks instead; this records whether configtest detects it at
+      # all, so nobody re-adds it as the assertion on the strength of the name.
+      - name: Does configtest detect a second MPM?
+        run: |
+          out=$(docker run --rm --entrypoint sh batchfromscratch:ci -c \
+            'a2enmod mpm_event >/dev/null 2>&1; apache2ctl configtest 2>&1' || true)
+          echo "$out"
+          if echo "$out" | grep -q AH00534; then
+            echo "configtest DOES detect a second MPM"
+          else
+            echo "::warning::apache2ctl configtest does NOT detect a second MPM — the symlink count is the only real guard"
+          fi
+
       # A green Docker build proves the Dockerfile parses, not that the site runs.
       # Booting it against a real MySQL is what catches an Apache directive typo,
       # a bad wp-config heredoc, or an entrypoint that exits before Apache starts.
