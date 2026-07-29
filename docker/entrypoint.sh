@@ -257,5 +257,39 @@ install -o www-data -g www-data -m 0644 \
 # ---------------------------------------------------------------------------
 # The upstream entrypoint only performs its setup when the command starts with
 # "apache2", so it is invoked with the real command rather than a wrapper script.
+
+# TEMPORARY DIAGNOSTIC — remove once the database-error fault is closed.
+#
+# Both probes above connect, and WordPress still serves the database-error page. So
+# the failure is not in reaching the database; it is in what wp-config.php resolves
+# to inside an Apache request. That file is written by the upstream entrypoint during
+# the handoff below, which is why this has to run afterwards, from a background
+# subshell — the exec replaces this process, but a forked child survives it.
+#
+# DB_PASSWORD is deliberately excluded from what gets printed.
+(
+    sleep 10
+    cfg=/var/www/html/wp-config.php
+    if [ ! -f "${cfg}" ]; then
+        log "wp-config check: ${cfg} does not exist"
+        exit 0
+    fi
+    # wp-config-docker.php reads its values with getenv_docker() at request time, so
+    # whether Apache inherited the environment decides whether the file's fallback
+    # defaults are used instead.
+    if tr '\0' '\n' < /proc/1/environ 2>/dev/null | grep -q '^WORDPRESS_DB_HOST='; then
+        log "wp-config check: apache DID inherit WORDPRESS_DB_HOST"
+    else
+        log "wp-config check: apache did NOT inherit WORDPRESS_DB_HOST — the file's defaults decide"
+    fi
+    grep -nE "define\( *'DB_(NAME|USER|HOST)'" "${cfg}" 2>/dev/null \
+        | while IFS= read -r line; do log "wp-config: ${line}"; done
+    if grep -q 'wp-config-extra' "${cfg}" 2>/dev/null; then
+        log "wp-config check: the wp-config-extra.php require is present"
+    else
+        log "wp-config check: the wp-config-extra.php require is MISSING — WORDPRESS_CONFIG_EXTRA overridden?"
+    fi
+) &
+
 log "handing off to the WordPress entrypoint"
 exec docker-entrypoint.sh "$@"
