@@ -287,7 +287,28 @@ install -o www-data -g www-data -m 0644 \
     if grep -q 'wp-config-extra' "${cfg}" 2>/dev/null; then
         log "wp-config check: the wp-config-extra.php require is present"
     else
-        log "wp-config check: the wp-config-extra.php require is MISSING — WORDPRESS_CONFIG_EXTRA overridden?"
+        log "wp-config check: the wp-config-extra.php require is MISSING"
+        # Distinguishes a dashboard variable shadowing the image's ENV from the
+        # upstream entrypoint failing to insert a value that was correct all along.
+        case "${WORDPRESS_CONFIG_EXTRA:-}" in
+            *wp-config-extra*)
+                log "wp-config check: ...but the env var IS the image's require line," \
+                    "so the upstream entrypoint failed to insert it" ;;
+            '') log "wp-config check: ...and WORDPRESS_CONFIG_EXTRA is empty — image ENV overridden" ;;
+            *)  log "wp-config check: ...and WORDPRESS_CONFIG_EXTRA holds something else — overridden" ;;
+        esac
+    fi
+
+    # The decisive test: wp-cli evaluates wp-config.php exactly as WordPress does,
+    # getenv_docker() calls and all, then connects with whatever it got. Where the
+    # probes above test what we *think* the credentials are, this tests what
+    # WordPress actually resolves — and the client's error names the user and host
+    # it tried, which is what distinguishes real values from the shipped placeholders.
+    wp_db="$(cd /var/www/html && wp --allow-root db query 'SELECT 1' 2>&1 | head -4)"
+    if [ -z "${wp_db}" ]; then
+        log "wp-config check: wp db query succeeded — WordPress's own credentials work"
+    else
+        log "wp-config check: wp db query said: $(printf '%s' "${wp_db}" | tr '\n' ' ')"
     fi
 ) &
 
