@@ -141,6 +141,32 @@ if [ -z "${WORDPRESS_DB_HOST:-}" ]; then
     fi
 fi
 
+# Probe the connection. WordPress renders "Error establishing a database connection"
+# identically whether the host is unreachable, the credentials are rejected, or the
+# database does not exist — three different faults with three different fixes. The
+# mysql client is already in the image for the content import, so asking it directly
+# costs a second at boot and turns that one page into a specific answer.
+#
+# Non-fatal by design: a database that is still starting should not stop Apache from
+# coming up, or the healthcheck fails and Railway restarts into the same race.
+if [ -n "${WORDPRESS_DB_HOST:-}" ]; then
+    db_host="${WORDPRESS_DB_HOST%%:*}"
+    db_port="${WORDPRESS_DB_HOST##*:}"
+    [ "${db_port}" = "${db_host}" ] && db_port=3306
+    # MYSQL_PWD rather than -p so the password never appears in the process list.
+    if db_probe="$(MYSQL_PWD="${WORDPRESS_DB_PASSWORD:-}" mysql \
+            --connect-timeout=5 \
+            -h "${db_host}" -P "${db_port}" \
+            -u "${WORDPRESS_DB_USER:-root}" \
+            -e 'SELECT 1' "${WORDPRESS_DB_NAME:-}" 2>&1)"; then
+        log "database: connected to ${db_host}:${db_port}/${WORDPRESS_DB_NAME:-}"
+    else
+        log "ERROR: database connection FAILED — every page will show 'Error"
+        log "ERROR: establishing a database connection'. The client reported:"
+        printf '%s\n' "${db_probe}" >&2
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # 4. Persistent wp-content
 # ---------------------------------------------------------------------------
