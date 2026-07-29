@@ -422,10 +422,17 @@ PHPPROBE
     # is_blog_installed() calls dead_db() when the tables exist but siteurl does not:
     # an install that created the schema and never finished writing its options looks,
     # to a visitor, exactly like a database that cannot be reached.
+    # The row existing is not the test. is_blog_installed() reads siteurl's VALUE and
+    # treats an empty one as "not installed", then finds tables present and calls
+    # dead_db(). Length and autoload are what distinguish a finished install from a
+    # half-written one — and autoload matters because alloptions is read from it.
     log "check: options -> $(cd /var/www/html && wp --allow-root db query \
-        "SELECT option_name FROM wp_options WHERE option_name IN ('siteurl','home','blogname')" \
-        2>&1 | tr '\n' ' ') | rows=$(cd /var/www/html && wp --allow-root db query \
-        'SELECT COUNT(*) FROM wp_options' 2>&1 | tail -1)"
+        "SELECT option_name, LENGTH(option_value) AS len, autoload FROM wp_options \
+         WHERE option_name IN ('siteurl','home','blogname')" 2>&1 | tr '\n' ' ')"
+    log "check: option rows -> $(cd /var/www/html && wp --allow-root db query \
+        'SELECT COUNT(*) FROM wp_options' 2>&1 | tr '\n' ' ')"
+    log "check: users -> $(cd /var/www/html && wp --allow-root db query \
+        'SELECT COUNT(*) FROM wp_users' 2>&1 | tr '\n' ' ')"
     log "check: getenv_docker -> $(sed -n '/function getenv_docker/,/^}/p' \
         /var/www/html/wp-config.php 2>/dev/null | tr -s '\n\t ' ' ')"
 
