@@ -354,6 +354,31 @@ install -o www-data -g www-data -m 0644 \
             require "/var/www/html/wp-load.php";
             echo "wpdb connected\n";
         ' 2>&1 | grep -aiE 'warning|fatal|mysqli|connected' | head -4 | tr '\n' ' ')"
+    # wpdb connects under the CLI and fails under Apache, so the two SAPIs disagree
+    # about something. The candidates are what getenv() returns to mod_php and how
+    # wp-config.php's getenv_docker() asks for it. Both are read here rather than
+    # reasoned about. Presence and length only — no value is ever emitted, and the
+    # probe is removed as soon as it has been fetched.
+    cat > /var/www/html/bfs-envprobe.php <<'PHPPROBE'
+<?php
+header( 'Content-Type: text/plain' );
+foreach ( array( 'WORDPRESS_DB_HOST', 'WORDPRESS_DB_USER', 'WORDPRESS_DB_NAME', 'WORDPRESS_DB_PASSWORD' ) as $k ) {
+	$v = getenv( $k );
+	printf(
+		"%s getenv=%s len=%d _ENV=%s _SERVER=%s | ",
+		$k,
+		false === $v ? 'FALSE' : 'set',
+		false === $v ? 0 : strlen( $v ),
+		isset( $_ENV[ $k ] ) ? 'y' : 'n',
+		isset( $_SERVER[ $k ] ) ? 'y' : 'n'
+	);
+}
+PHPPROBE
+    log "check: apache PHP env -> $(curl -s "http://127.0.0.1:${PORT}/bfs-envprobe.php" 2>&1 | tr '\n' ' ')"
+    rm -f /var/www/html/bfs-envprobe.php
+    log "check: getenv_docker -> $(sed -n '/function getenv_docker/,/^}/p' \
+        /var/www/html/wp-config.php 2>/dev/null | tr -s '\n\t ' ' ')"
+
     probe_code="$(curl -s -o /tmp/bfs-local-probe -w '%{http_code}' \
         "http://127.0.0.1:${PORT}/" 2>&1 || true)"
     log "check: local request to Apache -> HTTP ${probe_code}" \
