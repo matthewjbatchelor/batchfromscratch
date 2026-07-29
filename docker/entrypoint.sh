@@ -313,13 +313,33 @@ install -o www-data -g www-data -m 0644 \
         && wp --allow-root option get siteurl 2>&1 | head -2 | tr '\n' ' ')"
     log "check: tables in the database -> $(cd /var/www/html \
         && wp --allow-root db query 'SHOW TABLES' 2>&1 | wc -l | tr -d ' ') line(s)"
-    # wpdb wraps its connect in @ unless WP_DEBUG is set, which is why every probe so
-    # far has had to infer the cause instead of reading it. wp-config-docker.php takes
-    # WP_DEBUG from WORDPRESS_DEBUG, so setting it for this one command unsuppresses
-    # the driver's actual error. Scoped to the command; nothing is displayed publicly.
-    log "check: wpdb error -> $(cd /var/www/html \
-        && WORDPRESS_DEBUG=1 wp --allow-root option get siteurl 2>&1 \
-        | head -8 | tr '\n' ' ')"
+    # wp-settings.php loads wp-content/db.php in place of wpdb if it exists. A stale
+    # drop-in on the volume would explain a connection that fails only through
+    # WordPress while every direct attempt succeeds.
+    log "check: drop-ins -> $(ls -1 /var/www/html/wp-content/db.php \
+        /var/www/html/wp-content/object-cache.php \
+        /var/www/html/wp-content/advanced-cache.php 2>/dev/null | tr '\n' ' ')${NONE:-}"
+
+    # The exact constants WordPress ends up with, taken by including wp-config.php
+    # with its wp-settings require removed — the same values, resolved the same way,
+    # with none of wp-cli's error handling in between. Bracketed to make trailing
+    # whitespace visible; the password is reported as a length, never printed.
+    sed "s#require_once ABSPATH . 'wp-settings.php';##" /var/www/html/wp-config.php \
+        > /tmp/bfs-cfg.php 2>/dev/null
+    log "check: resolved constants -> $(php -r '
+        include "/tmp/bfs-cfg.php";
+        printf("DB_HOST=[%s] DB_USER=[%s] DB_NAME=[%s] password_length=%d",
+            DB_HOST, DB_USER, DB_NAME, strlen(DB_PASSWORD));
+        $m = mysqli_init();
+        $h = DB_HOST; $p = 3306;
+        if (($i = strrpos($h, ":")) !== false) { $p = (int) substr($h, $i + 1); $h = substr($h, 0, $i); }
+        if (@mysqli_real_connect($m, $h, DB_USER, DB_PASSWORD, null, $p)) {
+            printf(" | connect OK, select_db=%s", mysqli_select_db($m, DB_NAME) ? "ok" : "FAILED");
+        } else {
+            printf(" | connect FAILED: %s", mysqli_connect_error());
+        }
+    ' 2>&1 | tr '\n' ' ')"
+    rm -f /tmp/bfs-cfg.php
     probe_code="$(curl -s -o /tmp/bfs-local-probe -w '%{http_code}' \
         "http://127.0.0.1:${PORT}/" 2>&1 || true)"
     log "check: local request to Apache -> HTTP ${probe_code}" \
