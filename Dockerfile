@@ -70,7 +70,12 @@ COPY --chown=www-data:www-data wp-content/mu-plugins \
 # Static health endpoint. Deliberately not a WordPress route: Railway's health check
 # should tell us Apache and PHP are alive even if the database is unreachable, and a
 # WordPress URL would either redirect or return a themed error page.
-COPY config/healthz.php /usr/src/wordpress/healthz.php
+#
+# Staged outside /usr/src/wordpress so it does not ride in on the upstream entrypoint's
+# copy step. That copy is conditional — it only runs when the docroot has no WordPress
+# in it — so a health endpoint that depends on it is a health endpoint that disappears
+# in exactly the situations worth alerting on. The entrypoint installs it directly.
+COPY config/healthz.php /usr/local/share/batchfromscratch/healthz.php
 
 # --- WordPress configuration ----------------------------------------------
 # The upstream entrypoint appends WORDPRESS_CONFIG_EXTRA verbatim into wp-config.php.

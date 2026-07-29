@@ -132,6 +132,39 @@ jobs:
             exit 1
           fi
 
+      # Every step above boots the image the way `docker run` does — ENTRYPOINT plus
+      # CMD, no override. Railway does not: a start command set in railway.json or in
+      # the dashboard arrives shell-wrapped as `/bin/sh -c apache2-foreground`, and
+      # the upstream entrypoint only performs its setup when $1 begins with "apache2".
+      # That mismatch left the document root empty and failed Railway's health check
+      # while CI stayed green, so the wrapped form is now booted here as well.
+      - name: Boot the way Railway does (shell-wrapped start command)
+        run: |
+          docker run -d --name web-wrapped --network ci -p 8081:8081 \
+            -e PORT=8081 \
+            -e MYSQLHOST=db -e MYSQLPORT=3306 \
+            -e MYSQLUSER=wordpress -e MYSQLPASSWORD=wordpress -e MYSQLDATABASE=wordpress \
+            -e WP_HOME=http://localhost:8081 -e WP_SITEURL=http://localhost:8081 \
+            batchfromscratch:ci /bin/sh -c apache2-foreground
+          for i in $(seq 1 45); do
+            if curl -fsS http://localhost:8081/healthz.php | grep -q '^ok$'; then
+              echo "health check passed"; break
+            fi
+            sleep 2
+            if [ "$i" = 45 ]; then
+              echo "::error::shell-wrapped boot never became healthy"
+              docker logs web-wrapped
+              exit 1
+            fi
+          done
+          # The health endpoint alone would pass even if WordPress were never
+          # installed — it is served by Apache regardless. Assert the setup the
+          # wrapper used to skip actually ran.
+          docker exec web-wrapped test -f /var/www/html/index.php
+          docker exec web-wrapped test -f /var/www/html/wp-config.php
+
       - name: Container logs
         if: always()
-        run: docker logs web || true
+        run: |
+          docker logs web || true
+          docker logs web-wrapped || true

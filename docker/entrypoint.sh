@@ -9,6 +9,37 @@ set -euo pipefail
 log() { printf '[entrypoint] %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
+# 0. Unwrap a shell-wrapped command
+# ---------------------------------------------------------------------------
+# Railway runs a custom start command through a shell, so the container is invoked
+# as `/bin/sh -c apache2-foreground` rather than `apache2-foreground`. The upstream
+# WordPress entrypoint gates all of its work on `$1` starting with "apache2", so a
+# wrapped command skips the copy out of /usr/src/wordpress and the generation of
+# wp-config.php — Apache then serves an empty document root and every request 404s.
+# railway.json no longer sets a start command, but one set in the Railway dashboard
+# overrides the file, so the wrapping is undone here rather than merely avoided.
+if [ "$#" -eq 3 ] && [ "$2" = '-c' ]; then
+    case "$1" in
+        sh|bash|/bin/sh|/bin/bash|/usr/bin/sh|/usr/bin/bash)
+            case "$3" in
+                # Anything containing shell syntax is left wrapped: splitting it on
+                # whitespace here would change what it means, and a redirect or an
+                # && chain genuinely does need a shell to run it.
+                *[\;\&\|\<\>\$\(\)\`\'\"\\]*) ;;
+                apache2*|php-fpm*)
+                    log "unwrapping shell-wrapped start command: $3"
+                    # Deliberately unquoted — splitting on whitespace was the only
+                    # remaining job of the wrapper we are removing.
+                    # shellcheck disable=SC2086
+                    set -- $3
+                    ;;
+            esac
+            ;;
+    esac
+fi
+log "command: $*"
+
+# ---------------------------------------------------------------------------
 # 1. Listen port
 # ---------------------------------------------------------------------------
 # Railway assigns the port at runtime via $PORT and routes to it. The upstream
@@ -85,7 +116,19 @@ if [ ! -f "${WP_CONTENT}/.ownership-done" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Hand off
+# 4. Health endpoint
+# ---------------------------------------------------------------------------
+# Installed on every boot, before WordPress exists, so that Railway's health check
+# passes as soon as Apache is up and reports honestly if the WordPress install step
+# later goes wrong. On a genuinely first boot this makes the document root non-empty
+# and the upstream entrypoint logs "WARNING: /var/www/html is not empty! (copying
+# anyhow)" — expected, and it does copy anyhow.
+install -o www-data -g www-data -m 0644 \
+    /usr/local/share/batchfromscratch/healthz.php \
+    /var/www/html/healthz.php
+
+# ---------------------------------------------------------------------------
+# 5. Hand off
 # ---------------------------------------------------------------------------
 # The upstream entrypoint only performs its setup when the command starts with
 # "apache2", so it is invoked with the real command rather than a wrapper script.
