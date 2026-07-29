@@ -398,6 +398,18 @@ error_reporting( E_ALL );
 // WP_ADMIN is defined. No mysqli warning appears, so the connection is not what
 // failed — this is how to read which caller actually gave up and why.
 define( 'WP_ADMIN', true );
+// wp_die() emits a full HTML page with inline CSS, and the one sentence worth
+// reading sits after it. Buffer the lot and reduce it on the way out — the shutdown
+// function still runs when wp_die() calls die(), which is the only way to get at it.
+ob_start();
+register_shutdown_function(
+	function () {
+		$out = ob_get_clean();
+		$out = preg_replace( '#<style[^>]*>.*?</style>#s', '', $out );
+		$out = trim( preg_replace( '/\s+/', ' ', strip_tags( $out ) ) );
+		echo ' RESULT: ' . substr( $out, 0, 300 );
+	}
+);
 require '/var/www/html/wp-load.php';
 echo 'WP LOADED OK';
 PHPPROBE
