@@ -12,6 +12,10 @@ wp-content/uploads/
 wp-content/plugins/
 wp-content/upgrade/
 wp-content/languages/
+# NextGEN: gallery/ is its image store, ngg/ the directory it creates for module
+# overrides. Both are 1.5GB of volume state, not repository content.
+wp-content/gallery/
+wp-content/ngg/
 
 # Local tooling
 .claude/settings.local.json
