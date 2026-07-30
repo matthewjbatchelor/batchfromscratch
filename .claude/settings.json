@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sS *)",
+      "Bash(curl -s *)",
+      "Bash(curl -sSL *)",
+      "Bash(curl -fsSL *)",
+      "Bash(unzip -l *)",
+      "Bash(unzip -p *)",
+      "Bash(railway status *)",
+      "Bash(railway whoami)"
+    ]
+  }
+}
