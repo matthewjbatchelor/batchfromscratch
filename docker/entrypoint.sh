@@ -216,6 +216,15 @@ if [ -n "${WORDPRESS_DB_HOST:-}" ]; then
                     log "WARNING: WP_SITEURL/WP_HOME contains unexpected characters; not repairing"
                     ;;
                 *)
+                    # The trailing `|| true` is load-bearing. This repair is
+                    # advisory, but on a first boot the WordPress tables do not
+                    # exist yet and the UPDATE fails — and under `set -euo
+                    # pipefail` a command substitution whose pipeline exits
+                    # non-zero aborts the entrypoint on the spot, before Apache
+                    # is ever started. The container then never binds a port, so
+                    # the only symptom is a health check that times out against
+                    # a silent container. That is what made a fresh database
+                    # unbootable, and what CI had been failing on.
                     repaired="$(MYSQL_PWD="${WORDPRESS_DB_PASSWORD:-}" mysql \
                         --connect-timeout=5 -N -B \
                         -h "${db_host}" -P "${db_port}" \
@@ -224,10 +233,15 @@ if [ -n "${WORDPRESS_DB_HOST:-}" ]; then
                                SET option_value = '${site_url}'
                              WHERE option_name IN ('siteurl','home')
                                AND (option_value IS NULL OR option_value = '');
-                            SELECT ROW_COUNT();" 2>&1 | tail -1)"
+                            SELECT ROW_COUNT();" 2>&1 | tail -1 || true)"
                     case "${repaired}" in
                         0) : ;;  # nothing blank; the usual case once healthy
                         [1-9]*) log "database: filled ${repaired} blank site address row(s) with ${site_url}" ;;
+                        # An empty database is the expected state on a first
+                        # boot, not a fault: WordPress has not installed yet, so
+                        # there is no options table and nothing to repair.
+                        *"doesn't exist"*|*"Unknown database"*)
+                            log "database: no WordPress tables yet — skipping site address repair" ;;
                         *) log "WARNING: site address repair did not run cleanly: ${repaired}" ;;
                     esac
                     ;;
