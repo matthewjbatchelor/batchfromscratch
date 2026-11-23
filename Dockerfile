@@ -11,7 +11,7 @@
 #
 # To move it: bump the digest, let CI go green, then deploy. `docker buildx imagetools
 # inspect wordpress:php8.3-apache` prints the current one.
-ARG WP_IMAGE_TAG=php8.3-apache@sha256:6888208af0e3cb93af427c13a434273b07ba353ce9e2d5a29abe3031bb28ea3a
+ARG WP_IMAGE_TAG=php8.3-apache@sha256:344ca7cf3566d266d5dacdd71e3dd4fe9781b0063097fbb9972fe823412ae9e0
 FROM wordpress:${WP_IMAGE_TAG}
 
 # --- system packages -------------------------------------------------------
